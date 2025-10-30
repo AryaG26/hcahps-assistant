@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HCAHPS RAG Data Assistant (Ollama Simulation)</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Chart.js for visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .ollama-bg { background-color: #0b3d64; } /* Dark blue theme for Ollama look */
+        .ollama-button { background-color: #1c6d83; transition: all 0.2s; }
+        .ollama-button:hover:not(:disabled) { background-color: #124c5b; }
+        .assistant-message { background-color: #e5e7eb; border-radius: 0.75rem; }
+        .user-message { background-color: #d1d5db; border-radius: 0.75rem; }
+        /* Style for the drag-and-drop area */
+        .drop-area {
+            border: 2px dashed #9ca3af;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        .drop-area:hover {
+            border-color: #3b82f6;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-start justify-center p-4">
+
+    <!-- Main Container -->
+    <div class="w-full max-w-5xl bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col h-[90vh]">
+        
+        <!-- Header -->
+        <header class="ollama-bg text-white p-4 flex items-center shadow-lg">
+            <svg class="w-8 h-8 mr-3" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm3.707 14.707a1 1 0 01-1.414 0L12 13.414l-2.293 2.293a1 1 0 01-1.414-1.414L10.586 12 8.293 9.707a1 1 0 011.414-1.414L12 10.586l2.293-2.293a1 1 0 011.414 1.414L13.414 12l2.293 2.293a1 1 0 010 1.414z"/>
+            </svg>
+            <h1 class="text-xl font-bold">HCAHPS RAG Data Assistant (Ollama Simulation)</h1>
+        </header>
+
+        <!-- CSV Loading Area -->
+        <div id="file-upload-area" class="p-4 border-b border-gray-200 bg-gray-50">
+            <h3 class="text-sm font-semibold text-gray-700 mb-2 text-center">Load Your Data: (Requires Both Files)</h3>
+            <div class="grid grid-cols-2 gap-4">
+                
+                <!-- Facts File Upload -->
+                <div>
+                    <label for="facts-file-input" class="block text-xs font-medium text-gray-600 mb-1">1. HCAHPS Facts Data</label>
+                    <input id="facts-file-input" type="file" accept=".csv" data-file-type="facts"
+                           class="w-full text-sm text-gray-900 border border-gray-300 rounded-lg bg-white file:mr-4 file:py-1 file:px-2 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer">
+                    <p id="facts-load-status" class="text-xs mt-1 text-gray-500 italic">Awaiting upload...</p>
+                </div>
+
+                <!-- Summaries File Upload -->
+                <div>
+                    <label for="summaries-file-input" class="block text-xs font-medium text-gray-600 mb-1">2. HCAHPS Summaries Data</label>
+                    <input id="summaries-file-input" type="file" accept=".csv" data-file-type="summaries"
+                           class="w-full text-sm text-gray-900 border border-gray-300 rounded-lg bg-white file:mr-4 file:py-1 file:px-2 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer">
+                    <p id="summaries-load-status" class="text-xs mt-1 text-gray-500 italic">Awaiting upload...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat/Output Area -->
+        <div id="output-area" class="flex-grow p-6 space-y-4 overflow-y-auto">
+            <!-- Initial Assistant Message -->
+            <div class="flex justify-start">
+                <div class="assistant-message max-w-3xl p-4 shadow">
+                    <p class="font-semibold text-gray-800">Hello! I am a simulated RAG assistant. Please upload both the Facts and Summaries CSV files above to begin the data analysis.</p>
+                </div>
+            </div>
+        </div>
+        <div id="output-area" class="flex-grow p-6 space-y-4 overflow-y-auto">
+             <!-- Chart Placeholder -->
+                <div id="chart-container" class="hidden bg-white p-6 rounded-xl shadow-inner border border-gray-300">
+                <h3 class="text-lg font-bold mb-4 text-center text-gray-800">Key Patient Satisfaction Metrics ("Always" Responses)</h3>
+                <canvas id="satisfactionChart" class="w-[200px] h-auto max-h-[150px]"></canvas>
+            </div> 
+            
+        </div>
+        <!-- Input and Loading Area -->
+        <div class="p-4 border-t border-gray-200">
+            <div id="loading-indicator" class="hidden text-center text-sm font-medium text-gray-600 mb-2">
+                Ollama is processing query and generating content...
+            </div>
+            <div class="flex space-x-3">
+                <input id="user-input" type="text" placeholder="Ask a question about the HCAHPS data..." 
+                       class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-800 transition duration-150" disabled>
+                <button id="send-button" class="ollama-button text-white font-semibold px-6 py-3 rounded-lg shadow-md disabled:opacity-50" disabled>
+                    Send
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let HCAHPS_DATA = { summaries: [], facts: [], facility_name: "Unknown Facility" };
+        let chartInstance = null;
+        let loadedFiles = { facts: false, summaries: false };
+        
+        // --- 1. DATA LOADING AND PARSING ---
+
+        function simpleSplitCSV(row, separator = ',') {
+            let result = [];
+            let current = '';
+            let inQuotes = false;
+
+            for (let i = 0; i < row.length; i++) {
+                const char = row[i];
+
+                if (char === '"') {
+                    inQuotes = !inQuotes;
+                    // Don't append quote characters unless necessary
+                } else if (char === separator && !inQuotes) {
+                    result.push(current.trim());
+                    current = '';
+                } else {
+                    current += char;
+                }
+            }
+            result.push(current.trim()); // Push the last element
+            return result.map(s => s.replace(/^"|"$/g, '').trim()); // Final trim and quote removal
+        }
+
+
+        function loadDataFromFile(event) {
+            const file = event.target.files[0];
+            const fileType = event.target.dataset.fileType;
+            const statusElement = document.getElementById(`${fileType}-load-status`);
+            
+            if (!file) {
+                statusElement.textContent = "No file selected.";
+                statusElement.className = 'text-xs mt-1 text-red-500 italic';
+                return;
+            }
+
+            statusElement.textContent = `Reading ${fileType} file: ${file.name}...`;
+            statusElement.className = 'text-xs mt-1 text-blue-500 italic';
+
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                try {
+                    const csvText = e.target.result;
+                    if (csvText.length < 100) { throw new Error("File content is too short or empty."); }
+
+                    // Parse the loaded text and update HCAHPS_DATA
+                    parseCSV(csvText, fileType);
+
+                    if (HCAHPS_DATA[fileType].length === 0) {
+                        throw new Error(`Could not extract relevant data for ${fileType} from the file. Check if the file contains the expected columns (measure_id, dist_text/percent).`);
+                    }
+
+                    // Update UI state for this file
+                    loadedFiles[fileType] = true;
+                    statusElement.textContent = `${fileType.charAt(0).toUpperCase() + fileType.slice(1)} data loaded successfully.`;
+                    statusElement.className = 'text-xs mt-1 text-green-500 italic font-semibold';
+
+                    checkAllFilesLoaded();
+
+                } catch (error) {
+                    console.error("Data Parsing Error:", error);
+                    loadedFiles[fileType] = false;
+                    statusElement.textContent = `Error processing ${fileType} file: ${error.message}.`;
+                    statusElement.className = 'text-xs mt-1 text-red-500 italic';
+                }
+            };
+
+            reader.onerror = function() {
+                loadedFiles[fileType] = false;
+                statusElement.textContent = "Error reading file.";
+                statusElement.className = 'text-xs mt-1 text-red-500 italic';
+            };
+
+            reader.readAsText(file);
+        }
+
+        function checkAllFilesLoaded() {
+            if (loadedFiles.facts && loadedFiles.summaries) {
+                document.getElementById('user-input').disabled = false;
+                document.getElementById('send-button').disabled = false;
+                addMessage(`All data for ${HCAHPS_DATA.facility_name} loaded successfully. Chat is now enabled. Try "Summarize" or "What is the highest score category?".`, false);
+            }
+        }
+
+        function parseCSV(csvText, fileType) {
+            const rows = csvText.trim().split('\n');
+            if (rows.length < 2) return;
+
+            // Simple header parsing
+            const headers = rows[0].split(',').map(h => h.trim().replace(/\s/g, '_'));
+            const dataRows = rows.slice(1);
+
+            let records = [];
+
+            dataRows.forEach(row => {
+                // Use the robust splitter
+                const values = simpleSplitCSV(row); 
+                
+                if (values.length !== headers.length) { 
+                    // console.log("Skipping misaligned row:", row);
+                    return; 
+                }
+
+                let record = {};
+                headers.forEach((header, i) => {
+                    record[header] = values[i];
+                });
+
+                // Set facility name from the first valid record, regardless of file type
+                if (HCAHPS_DATA.facility_name === "Unknown Facility" && record.Facility_Name && record.Facility_Name !== "") {
+                    HCAHPS_DATA.facility_name = record.Facility_Name;
+                }
+                
+                // --- Categorization Logic for storage ---
+                if (fileType === 'summaries' && record.measure_id) { // Check for ID and required content
+                    // The main distinguishing feature of summaries data is the dist_text field
+                    if (record.dist_text && record.dist_text.includes('%')) {
+                        records.push({
+                            measure_id: record.measure_id,
+                            dist_text: record.dist_text
+                        });
+                    }
+                } else if (fileType === 'facts' && record.measure_id) {
+                    // The main distinguishing feature of facts data is the percent field
+                    records.push({
+                        measure_id: record.measure_id,
+                        answer_label: record.answer_label,
+                        percent: parseFloat(record.percent) || null,
+                        star_rating: parseInt(record.star_rating) || null
+                    });
+                }
+            });
+
+            HCAHPS_DATA[fileType] = records;
+        }
+
+        // --- 2. DATA UTILITIES & CHARTING (Remains the same) ---
+
+        function getPercentageFromDistText(measureId) {
+            const item = HCAHPS_DATA.summaries.find(d => d.measure_id === measureId);
+            if (item) {
+                const match = item.dist_text.match(/:\s*(\d+\.?\d*)%/);
+                return match ? parseFloat(match[1]) : null;
+            }
+            return null;
+        }
+
+        function getPercentageFromFacts(measureId) {
+            const item = HCAHPS_DATA.facts.find(d => d.measure_id === measureId);
+            return item && item.percent !== null ? item.percent : null;
+        }
+
+        const KEY_METRICS = [
+            { id: 'H_NURSE_RESPECT_A_P', label: 'Nurse Respect', source: 'facts', getter: getPercentageFromFacts },
+            { id: 'H_COMP_1_A_P', label: 'Nurse Communication', source: 'facts', getter: getPercentageFromFacts },
+            { id: 'H_CLEAN_HSP_A_P', label: 'Room Cleanliness', source: 'summaries', getter: getPercentageFromDistText },
+            { id: 'H_BATH_HELP_A_P', label: 'Bathroom Help', source: 'summaries', getter: getPercentageFromDistText },
+            { id: 'H_CALL_BUTTON_A_P', label: 'Call Button Help', source: 'summaries', getter: getPercentageFromDistText }
+        ];
+
+        function plotCharts() {
+            const ctx = document.getElementById('satisfactionChart').getContext('2d');
+            
+            const metrics = KEY_METRICS.map(m => {
+                return { label: m.label, value: m.getter(m.id) };
+            }).filter(m => m.value !== null);
+
+            if (metrics.length === 0) { document.getElementById('chart-container').classList.add('hidden'); return; }
+
+            if (chartInstance) { chartInstance.destroy(); }
+
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: metrics.map(m => m.label),
+                    datasets: [{
+                        label: '% of Patients Reporting "Always"',
+                        data: metrics.map(m => m.value),
+                        backgroundColor: ['#1c6d83', '#3b82f6', '#f59e0b', '#ef4444', '#9333ea'],
+                        borderColor: '#0b3d64', borderWidth: 1, borderRadius: 8
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        y: { beginAtZero: true, max: 100, title: { display: true, text: 'Percentage (%)' } }
+                    },
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: (context) => context.dataset.label + ': ' + context.parsed.y + '%' } } }
+                }
+            });
+
+            document.getElementById('chart-container').classList.remove('hidden');
+        }
+
+        // --- 3. LLM ASSISTANT SIMULATION (RAG LOGIC - Remains the same) ---
+
+        function getAnalyzedMetrics() {
+             return KEY_METRICS.map(m => ({ 
+                label: m.label, 
+                value: m.getter(m.id) 
+            })).filter(m => m.value !== null).sort((a, b) => b.value - a.value);
+        }
+
+        async function simulateOllamaResponse(query) {
+            const queryLower = query.toLowerCase();
+            let responseText = "";
+            let action = 'text'; 
+
+            if (!loadedFiles.facts || !loadedFiles.summaries) {
+                return { text: "I don't have all data loaded yet. Please ensure both Facts and Summaries files are uploaded.", action: 'text' };
+            }
+
+            const analyzedMetrics = getAnalyzedMetrics();
+
+            // --- FEATURE 1: EXTREMES IDENTIFICATION (Highest/Lowest) ---
+            if (queryLower.includes("highest") || queryLower.includes("best") || queryLower.includes("worst") || queryLower.includes("lowest")) {
+                if (analyzedMetrics.length > 0) {
+                    const highest = analyzedMetrics[0];
+                    const lowest = analyzedMetrics[analyzedMetrics.length - 1];
+                    
+                    if (queryLower.includes("highest") || queryLower.includes("best")) {
+                        responseText = `The highest performing metric is ${highest.label}, with ${highest.value}% of patients reporting "Always". This is a significant strength for ${HCAHPS_DATA.facility_name}.`;
+                    } else { // worst or lowest
+                        responseText = `The lowest performing metric among the key categories is ${lowest.label}, with ${lowest.value}% of patients reporting "Always". This area needs attention.`;
+                    }
+                } else {
+                    responseText = "I cannot identify extremes as there is no numerical data available in the key metrics.";
+                }
+
+            // --- FEATURE 2: COMPARATIVE ANALYSIS (Compare X and Y) ---
+            } else if (queryLower.includes("compare")) {
+                // Simplified comparison logic for the common case in the HCAHPS data
+                const isBathroomVsCall = (queryLower.includes("bathroom") && queryLower.includes("call")) || (queryLower.includes("call") && queryLower.includes("bathroom"));
+                
+                if (isBathroomVsCall) {
+                    const bath = getPercentageFromDistText('H_BATH_HELP_A_P');
+                    const call = getPercentageFromDistText('H_CALL_BUTTON_A_P');
+                    const difference = Math.abs(bath - call).toFixed(1);
+                    const betterMetric = bath > call ? 'Bathroom Help' : 'Call Button Help';
+
+                    responseText = `Comparative Analysis: Bathroom Help vs. Call Button Help
+                    \n- Bathroom Help (Always): ${bath}%
+                    \n- Call Button Help (Always): ${call}%
+                    \n\nThe difference is ${difference} percentage points. ${betterMetric} is the higher performing category.`;
+                } else {
+                     responseText = "Please ask me to compare two specific, loaded metrics, such as 'Compare call button and bathroom help'.";
+                }
+
+            // --- PLOT/CHART GENERATION ---
+            } else if (queryLower.includes("plot") || queryLower.includes("chart") || queryLower.includes("visualize")) {
+                responseText = "I've retrieved the key 'Always' scores and generated a visual comparison chart for you. You can see the facility's strengths and areas for improvement at a glance.";
+                action = 'chart';
+
+            // --- SPECIFIC NURSE DATA LOOKUP ---
+            } else if (queryLower.includes("nurse") || queryLower.includes("communication") || queryLower.includes("respect")) {
+                const comm = getPercentageFromFacts('H_COMP_1_A_P');
+                const respect = getPercentageFromFacts('H_NURSE_RESPECT_A_P');
+                const starItem = HCAHPS_DATA.facts.find(d => d.measure_id === 'H_COMP_1_STAR_RATING');
+                const star = starItem ? starItem.star_rating : 'N/A';
+
+                responseText = `The Nurse Communication Star Rating is ${star} out of 5. Specifically: 
+                \n- ${respect || 'N/A'}% of patients reported nurses "ALWAYS" treated them with courtesy and respect.
+                \n- ${comm || 'N/A'}% of patients reported nurses "ALWAYS" communicated well.`;
+
+            // --- DEFAULT GENERAL SUMMARY ---
+            } else {
+                const highest = analyzedMetrics[0];
+                const clean = getPercentageFromDistText('H_CLEAN_HSP_A_P');
+
+                responseText = `Here is a high-level summary for ${HCAHPS_DATA.facility_name}:
+                \n- Highest Score: ${highest.label} is very high at ${highest.value || 'N/A'}% ("Always").
+                \n- Room Cleanliness: ${clean || 'N/A'}% of patients reported their room was "ALWAYS" clean.
+                \n\nTry asking: "What is the worst metric?" or "Compare call button and bathroom help."`;
+            }
+
+            // Simulate delay
+            await new Promise(resolve => setTimeout(resolve, 1500));
+
+            return { text: responseText, action: action };
+        }
+
+        // --- 4. UI INTERACTION ---
+
+        function addMessage(text, isUser) {
+            const outputArea = document.getElementById('output-area');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `flex ${isUser ? 'justify-end' : 'justify-start'}`;
+            messageDiv.innerHTML = `
+                <div class="${isUser ? 'user-message' : 'assistant-message'} max-w-3xl p-4 shadow whitespace-pre-line">
+                    ${text.replace(/\n/g, '<br>')}
+                </div>
+            `;
+            outputArea.appendChild(messageDiv);
+            outputArea.scrollTop = outputArea.scrollHeight;
+        }
+
+        async function handleSend() {
+            const inputElement = document.getElementById('user-input');
+            const sendButton = document.getElementById('send-button');
+            const loadingIndicator = document.getElementById('loading-indicator');
+            const chartContainer = document.getElementById('chart-container');
+
+            const query = inputElement.value.trim();
+            if (!query) return;
+
+            // 1. Display user query
+            addMessage(query, true);
+            inputElement.value = '';
+
+            // 2. Lock UI and show loading
+            sendButton.disabled = true;
+            loadingIndicator.classList.remove('hidden');
+            
+            // 3. Get simulated LLM response
+            const result = await simulateOllamaResponse(query);
+
+            // 4. Handle response
+            if (result.action === 'chart') {
+                plotCharts();
+            } else {
+                if (chartInstance) {
+                    document.getElementById('chart-container').classList.add('hidden');
+                }
+            }
+            addMessage(result.text, false);
+
+            // 5. Unlock UI
+            sendButton.disabled = false;
+            loadingIndicator.classList.add('hidden');
+        }
+
+        // Initial setup on load
+        document.addEventListener('DOMContentLoaded', () => {
+            const sendButton = document.getElementById('send-button');
+            const inputElement = document.getElementById('user-input');
+            
+            document.getElementById('facts-file-input').addEventListener('change', loadDataFromFile);
+            document.getElementById('summaries-file-input').addEventListener('change', loadDataFromFile);
+
+            sendButton.addEventListener('click', handleSend);
+            inputElement.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !sendButton.disabled) {
+                    e.preventDefault();
+                    handleSend();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
